@@ -481,7 +481,13 @@
   .chat-msg{max-width:92%;padding:9px 12px;border-radius:12px;font-size:12.8px;line-height:1.45;}
   .chat-msg.user{align-self:flex-end;background:var(--blue);color:#fff;border-bottom-right-radius:4px;}
   .chat-msg.bot{align-self:flex-start;background:var(--bg-panel);border:1px solid var(--border);border-bottom-left-radius:4px;}
-  .chat-msg.bot table{font-size:11.8px;margin-top:6px;}
+  .chat-msg{flex-shrink:0;}  /* que las burbujas no se aplasten dentro del chat */
+  .chat-msg.bot{overflow-x:auto;min-width:0;overflow-wrap:anywhere;}
+  /* en el chat las celdas sí pueden partirse en varias líneas, para que la tabla quepa en la burbuja */
+  .chat-msg.bot table{font-size:11.8px;margin-top:6px;width:100%;table-layout:auto;}
+  .chat-msg.bot tbody td,.chat-msg.bot thead th{white-space:normal;word-break:normal;overflow-wrap:anywhere;vertical-align:top;}
+  .chat-msg.bot td.num,.chat-msg.bot th.num{white-space:nowrap;}
+  .chat-body{overflow-x:hidden;}
   .chat-msg.bot tbody td{padding:4px 6px;}
   .chat-msg.bot thead th{padding:0 6px 5px;font-size:10px;}
   .chat-msg.bot ul{margin:4px 0 0;padding-left:18px;}
