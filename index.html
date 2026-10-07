@@ -467,6 +467,32 @@
   .ret-note{font-size:11.5px;color:var(--text-mute);margin:-8px 0 16px;}
   .ret-bar-cell{display:flex;height:8px;border-radius:5px;overflow:hidden;background:var(--border-soft);min-width:90px;}
   .ret-bar-cell div{height:100%;}
+
+  /* ---------- ASISTENTE (chat local, sin IA externa) ---------- */
+  .chat-fab{position:fixed;right:22px;bottom:22px;z-index:300;background:var(--blue);color:#fff;border:none;border-radius:28px;padding:13px 20px;font-weight:800;font-size:13.5px;cursor:pointer;box-shadow:0 10px 26px -6px rgba(10,90,209,.55);font-family:inherit;display:flex;align-items:center;gap:8px;}
+  .chat-fab:hover{filter:brightness(1.08);}
+  .chat-panel{position:fixed;right:22px;bottom:22px;z-index:301;width:410px;max-width:calc(100vw - 32px);height:600px;max-height:calc(100vh - 44px);background:var(--bg-panel);border:1px solid var(--border);border-radius:16px;box-shadow:0 22px 50px -10px rgba(10,20,40,.35);display:flex;flex-direction:column;overflow:hidden;}
+  .chat-panel.hidden{display:none;}
+  .chat-head{background:#0c1c37;color:#fff;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;}
+  .chat-head b{font-size:14px;}
+  .chat-head span{display:block;font-size:11px;opacity:.75;margin-top:2px;}
+  .chat-head button{background:rgba(255,255,255,.12);border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:14px;}
+  .chat-body{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--bg-soft);}
+  .chat-msg{max-width:92%;padding:9px 12px;border-radius:12px;font-size:12.8px;line-height:1.45;}
+  .chat-msg.user{align-self:flex-end;background:var(--blue);color:#fff;border-bottom-right-radius:4px;}
+  .chat-msg.bot{align-self:flex-start;background:var(--bg-panel);border:1px solid var(--border);border-bottom-left-radius:4px;}
+  .chat-msg.bot table{font-size:11.8px;margin-top:6px;}
+  .chat-msg.bot tbody td{padding:4px 6px;}
+  .chat-msg.bot thead th{padding:0 6px 5px;font-size:10px;}
+  .chat-msg.bot ul{margin:4px 0 0;padding-left:18px;}
+  .chat-msg .muted{color:var(--text-mute);font-size:11.5px;}
+  .chat-sug{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+  .chat-sug button{background:var(--blue-soft);color:var(--blue);border:1px solid #cfe0fb;border-radius:14px;padding:4px 10px;font-size:11.5px;cursor:pointer;font-family:inherit;font-weight:600;}
+  .chat-sug button:hover{background:#dbe8fd;}
+  .chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--bg-panel);}
+  .chat-input input{flex:1;border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-size:13px;font-family:inherit;outline:none;}
+  .chat-input input:focus{border-color:var(--blue);}
+  .chat-input button{background:var(--blue);color:#fff;border:none;border-radius:10px;padding:0 14px;font-weight:700;cursor:pointer;font-family:inherit;}
 </style>
 </head>
 <body>
@@ -681,7 +707,7 @@
       <div class="meta-caption" id="adh-detalle-count"></div>
       <div style="overflow-x:auto;max-height:340px;overflow-y:auto;">
       <table>
-        <thead><tr><th>Ejecutivo</th><th>Motivo</th><th>Resultado</th><th class="num">Adherencia</th><th class="num">PEC</th><th class="num">PENC</th><th>Hallazgos</th></tr></thead>
+        <thead><tr><th>Ejecutivo</th><th>Motivo</th><th>Resultado</th><th class="num" title="Evaluaciones del ejecutivo en el mes/semana seleccionados">Q</th><th class="num">Adherencia</th><th class="num">PEC</th><th class="num">PENC</th><th>Hallazgos</th></tr></thead>
         <tbody id="tbl-adh-detalle"></tbody>
       </table>
       </div>
@@ -1917,13 +1943,17 @@ function renderAdhDetalle(){
     var va = a.adherencia===null ? -1 : a.adherencia, vb = b.adherencia===null ? -1 : b.adherencia;
     return (vb-va) || (a.nombre||'').localeCompare(b.nombre||'');
   });
+  // Q de muestra: evaluaciones de cada ejecutivo en el periodo mostrado (mes y semana)
+  var qEje = {};
+  todos.forEach(function(m){ qEje[m.nombre] = (qEje[m.nombre]||0) + 1; });
   var rows = todos.slice(0,150);
   currentAdhRows = rows;
-  if(!rows.length){ host.innerHTML = '<tr><td colspan="7" class="empty-note">Sin registros para este filtro</td></tr>'; $('adh-detalle-count').textContent = adhDetalleSemana ? 'Sin evaluaciones en '+adhDetalleSemana : ''; return; }
+  if(!rows.length){ host.innerHTML = '<tr><td colspan="8" class="empty-note">Sin registros para este filtro</td></tr>'; $('adh-detalle-count').textContent = adhDetalleSemana ? 'Sin evaluaciones en '+adhDetalleSemana : ''; return; }
   host.innerHTML = rows.map(function(m,i){
     var resColor = m.tipoGestion==='Retención' ? 'var(--green)' : m.tipoGestion==='Renuncia' ? 'var(--red)' : 'var(--text-mute)';
     return '<tr class="clickable" data-idx="'+i+'"><td>'+esc(m.nombre)+'</td><td>'+esc(m.motivo||'–')+'</td>'+
       '<td style="color:'+resColor+';font-weight:700;">'+esc(m.tipoGestion||'–')+'</td>'+
+      '<td class="num">'+n0(qEje[m.nombre])+'</td>'+
       '<td class="num"><span class="pill '+pillClass(m.adherencia)+'">'+pct(m.adherencia)+'</span></td>'+
       '<td class="num">'+pct(m.pec,0)+'</td><td class="num">'+pct(m.penc)+'</td><td>'+adhHallazgos(m)+'</td></tr>';
   }).join('');
@@ -3485,5 +3515,297 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 </script>
 
+
+<!-- Asistente: responde con los datos del dashboard, en el navegador (sin IA externa ni costo) -->
+<button type="button" class="chat-fab" id="chat-fab">💬 Asistente</button>
+<div class="chat-panel hidden" id="chat-panel">
+  <div class="chat-head">
+    <div><b>Asistente de Calidad</b><span>Responde con los datos del Excel de Adherencias</span></div>
+    <button type="button" id="chat-close" aria-label="Cerrar">✕</button>
+  </div>
+  <div class="chat-body" id="chat-body"></div>
+  <form class="chat-input" id="chat-form" autocomplete="off">
+    <input type="text" id="chat-text" placeholder="Ej.: ¿cómo le fue a Karla en setiembre?">
+    <button type="submit">Enviar</button>
+  </form>
+</div>
+<script>
+(function(){
+  /* ---------- utilidades ---------- */
+  function norm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+  function f1(v){ return pct(v,1); }
+  function nombreCorto(n){ return titleCase(n||''); }
+  var MESES_N = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,setiembre:9,septiembre:9,octubre:10,noviembre:11,diciembre:12};
+  var STOP = {de:1,del:1,la:1,las:1,los:1,el:1,y:1,mes:1,que:1,por:1,con:1,para:1,como:1,cual:1,semana:1};
+
+  function monthIdx(key){ return ADH.months.findIndex(function(m){return m.key===key;}); }
+  function labelMes(key){ var m = ADH.months[monthIdx(key)]; return m ? m.label : key; }
+  function prevKey(key){ var i = monthIdx(key); return i>0 ? ADH.months[i-1].key : null; }
+
+  /* ---------- nombres conocidos (ejecutivos y supervisores de todos los meses) ---------- */
+  var PERSONAS = {};
+  ADH.months.forEach(function(m){
+    var d = ADH.byMonth[m.key];
+    (d.ejecutivo||[]).forEach(function(e){ if(e.nombre) PERSONAS[e.nombre] = PERSONAS[e.nombre]==='sup' ? 'sup' : 'eje'; });
+    (d.supervisor||[]).forEach(function(s){ if(s.nombre) PERSONAS[s.nombre] = 'sup'; });
+  });
+  var NOMBRES = Object.keys(PERSONAS).map(function(n){
+    return {nombre:n, tipo:PERSONAS[n], tokens:norm(n).split(/\s+/).filter(function(t){return t.length>=3 && !STOP[t];})};
+  });
+
+  function buscarPersona(q){
+    var qt = {}; norm(q).split(/[^a-z0-9]+/).forEach(function(t){ if(t) qt[t]=1; });
+    var mejores = [], max = 0;
+    NOMBRES.forEach(function(p){
+      var s = p.tokens.filter(function(t){return qt[t];}).length;
+      if(s>max){ max=s; mejores=[p]; } else if(s && s===max){ mejores.push(p); }
+    });
+    return max ? mejores : [];
+  }
+
+  function detectarMes(q){
+    var nq = norm(q);
+    if(/mes (pasado|anterior)/.test(nq)) return prevKey(ADH.defaultMonth) || ADH.defaultMonth;
+    var anio = (nq.match(/20\d\d/)||[])[0];
+    for(var nombre in MESES_N){
+      if(nq.indexOf(nombre)>=0){
+        var cand = ADH.months.filter(function(m){ return m.mes===MESES_N[nombre] && (!anio || String(m.anio)===anio); });
+        if(cand.length) return cand[cand.length-1].key;
+      }
+    }
+    return null;
+  }
+  function detectarSemana(q){
+    var m = norm(q).match(/semana\s*([1-4])|\bs([1-4])\b/);
+    return m ? 'Semana '+(m[1]||m[2]) : '';
+  }
+
+  /* ---------- cálculos ---------- */
+  function contarRet(rows){
+    var c = {ret:0, ren:0, otros:0, total:rows.length};
+    rows.forEach(function(r){ if(r.t==='Retención') c.ret++; else if(r.t==='Renuncia') c.ren++; else c.otros++; });
+    c.pct = (c.ret+c.ren) ? c.ret/(c.ret+c.ren)*100 : null;
+    return c;
+  }
+  function delta(cur, prev){
+    if(cur===null||cur===undefined||prev===null||prev===undefined) return '';
+    var d = cur-prev;
+    return ' <span style="color:'+(d>=0?'var(--green)':'var(--red)')+';font-weight:700;">'+(d>=0?'▲':'▼')+Math.abs(d).toFixed(1)+' pp</span>';
+  }
+  function tabla(cabeceras, filas){
+    return '<table><thead><tr>'+cabeceras.map(function(c,i){return '<th'+(i?' class="num"':'')+'>'+c+'</th>';}).join('')+'</tr></thead><tbody>'+
+      filas.map(function(f){ return '<tr>'+f.map(function(c,i){return '<td'+(i?' class="num"':'')+'>'+c+'</td>';}).join('')+'</tr>'; }).join('')+'</tbody></table>';
+  }
+  function sug(lista){
+    return '<div class="chat-sug">'+lista.map(function(s){ return '<button type="button" data-q="'+esc(s)+'">'+esc(s)+'</button>'; }).join('')+'</div>';
+  }
+
+  /* ---------- respuestas ---------- */
+  function rResumen(mk, sem){
+    var d = ADH.byMonth[mk], k = sem && d.porSemana && d.porSemana[sem] ? d.porSemana[sem].kpis : d.kpis;
+    var p = prevKey(mk), kp = (!sem && p) ? ADH.byMonth[p].kpis : null;
+    var rows = (d.ret||[]).filter(function(r){ return !sem || r.s===sem; }), c = contarRet(rows);
+    return '<b>Resumen · '+labelMes(mk)+(sem?' · '+sem:'')+'</b> ('+n0(k.q)+' monitoreos)'+
+      '<ul><li>Adherencia: <b>'+f1(k.adherencia)+'</b>'+(kp?delta(k.adherencia,kp.adherencia):'')+'</li>'+
+      '<li>PEC: <b>'+f1(k.pec)+'</b>'+(kp?delta(k.pec,kp.pec):'')+'</li>'+
+      '<li>PENC: '+f1(k.penc)+' · PEC UF: '+f1(k.pecuf)+' · PEC NEG: '+f1(k.pecneg)+' · PEC CUMP: '+f1(k.peccump)+'</li>'+
+      '<li>Retención: <b>'+f1(c.pct)+'</b> ('+c.ret+' retenciones, '+c.ren+' renuncias)</li></ul>'+
+      (kp?'<div class="muted">Comparado con '+labelMes(p)+'.</div>':'')+
+      sug(['Top 5 de '+labelMes(mk).split(' ')[0], 'Errores más frecuentes', 'Retención por motivo']);
+  }
+
+  function rRanking(mk, mejores, sup){
+    var lista = (ADH.byMonth[mk].ejecutivo||[]).filter(function(e){ return !sup || e.jefe===sup; }).slice();
+    lista.sort(function(a,b){ return mejores ? (b.adherencia||0)-(a.adherencia||0) : (a.adherencia||0)-(b.adherencia||0); });
+    var top = lista.slice(0,5);
+    if(!top.length) return 'No hay ejecutivos con monitoreos en '+labelMes(mk)+'.';
+    return '<b>'+(mejores?'Mejores':'Menor')+' adherencia · '+labelMes(mk)+(sup?' · equipo de '+nombreCorto(sup):'')+'</b>'+
+      tabla(['Ejecutivo','Q','Adh.','PEC'], top.map(function(e){ return [nombreCorto(e.nombre), n0(e.q), f1(e.adherencia), pct(e.pec,0)]; }))+
+      '<div class="muted">Ordenado por adherencia del mes. Q = monitoreos.</div>'+
+      sug([mejores?'Ejecutivos con menor adherencia':'Mejores ejecutivos', '¿Cómo le fue a '+nombreCorto(top[0].nombre).split(' ')[0]+'?']);
+  }
+
+  function rErrores(mk, sem){
+    var d = ADH.byMonth[mk], par = sem && d.porSemana && d.porSemana[sem] ? d.porSemana[sem].pareto : d.pareto;
+    var top = (par||[]).filter(function(p){return p.errores>0;}).slice(0,6);
+    if(!top.length) return 'No hay errores registrados en '+labelMes(mk)+(sem?' · '+sem:'')+'.';
+    return '<b>Errores más frecuentes · '+labelMes(mk)+(sem?' · '+sem:'')+'</b>'+
+      tabla(['Ítem','Bloque','Casos','% error'], top.map(function(p){
+        var i = p.item.indexOf(' - '); return [esc(i>=0?p.item.slice(i+3):p.item), p.bloque, n0(p.errores), f1(100-p.pct)];
+      }))+'<div class="muted">% de monitoreos del periodo con ese error (ver Pareto para el detalle).</div>';
+  }
+
+  function rRetencion(mk, sem, filtro, etiqueta){
+    var rows = (ADH.byMonth[mk].ret||[]).filter(function(r){ return (!sem || r.s===sem) && (!filtro || filtro(r)); });
+    var c = contarRet(rows), p = prevKey(mk);
+    var cp = p && !sem ? contarRet((ADH.byMonth[p].ret||[]).filter(function(r){ return !filtro || filtro(r); })) : null;
+    var porProd = {};
+    rows.forEach(function(r){ var x = porProd[r.p] = porProd[r.p] || []; x.push(r); });
+    return '<b>Retenciones · '+labelMes(mk)+(sem?' · '+sem:'')+(etiqueta?' · '+etiqueta:'')+'</b>'+
+      '<ul><li><b>'+c.ret+'</b> retenciones, <b>'+c.ren+'</b> renuncias, '+c.otros+' consultas/otros</li>'+
+      '<li>% Retención: <b>'+f1(c.pct)+'</b>'+(cp?delta(c.pct,cp.pct):'')+'</li></ul>'+
+      tabla(['Producto','Ret.','Ren.','% Ret.'], Object.keys(porProd).sort().map(function(k){ var x = contarRet(porProd[k]); return [esc(k), x.ret, x.ren, f1(x.pct)]; }))+
+      '<div class="muted">Sobre llamadas monitoreadas. % = retenciones / (retenciones + renuncias).</div>'+
+      sug(['Retención por motivo', 'Retención por supervisor']);
+  }
+
+  function rMotivos(mk, sem){
+    var rows = (ADH.byMonth[mk].ret||[]).filter(function(r){ return !sem || r.s===sem; }), g = {};
+    rows.forEach(function(r){ (g[r.mo] = g[r.mo] || []).push(r); });
+    var filas = Object.keys(g).map(function(k){ var c = contarRet(g[k]); c.k = k; return c; }).sort(function(a,b){return b.total-a.total;});
+    return '<b>Motivo de renuncia · '+labelMes(mk)+(sem?' · '+sem:'')+'</b>'+
+      tabla(['Motivo','Llamadas','Ret.','Ren.','% Ret.'], filas.map(function(c){ return [esc(c.k), c.total, c.ret, c.ren, f1(c.pct)]; }));
+  }
+
+  function rRetSupervisores(mk){
+    var rows = ADH.byMonth[mk].ret||[], g = {};
+    rows.forEach(function(r){ (g[r.j] = g[r.j] || []).push(r); });
+    return '<b>Retención por supervisor · '+labelMes(mk)+'</b>'+
+      tabla(['Supervisor','Ret.','Ren.','% Ret.'], Object.keys(g).sort().map(function(k){ var c = contarRet(g[k]); return [nombreCorto(k), c.ret, c.ren, f1(c.pct)]; }));
+  }
+
+  function rEvolucion(){
+    var ult = ADH.months.slice(-6);
+    return '<b>Evolución mensual</b>'+tabla(['Mes','Q','Adh.','PEC','% Ret.'], ult.map(function(m){
+      var e = ADH.evolMensual.filter(function(x){return x.key===m.key;})[0] || {}, c = contarRet(ADH.byMonth[m.key].ret||[]);
+      return [m.label, n0(e.q), f1(e.adherencia), f1(e.pec), f1(c.pct)];
+    }))+'<div class="muted">Últimos '+ult.length+' meses.</div>';
+  }
+
+  function rSemanas(mk){
+    var s = ADH.byMonth[mk].semanal||[];
+    if(!s.length) return 'No hay datos semanales en '+labelMes(mk)+'.';
+    return '<b>Por semana · '+labelMes(mk)+'</b>'+tabla(['Semana','Q','Adh.','PEC','PENC'], s.map(function(w){
+      return [w.semana, n0(w.q), f1(w.adherencia), f1(w.pec), f1(w.penc)];
+    }));
+  }
+
+  function rCuartiles(mk){
+    var c = {Q1:0,Q2:0,Q3:0,Q4:0}, ej = ADH.byMonth[mk].ejecutivo||[];
+    ej.forEach(function(e){ c[e.cuartil]++; });
+    var q4 = ej.filter(function(e){return e.cuartil==='Q4';}).map(function(e){return nombreCorto(e.nombre);});
+    return '<b>Cuartiles · '+labelMes(mk)+'</b> ('+ej.length+' ejecutivos)'+
+      '<ul><li>Q1 (mejor 25%): '+c.Q1+'</li><li>Q2: '+c.Q2+'</li><li>Q3: '+c.Q3+'</li><li>Q4 (menor 25%): '+c.Q4+'</li></ul>'+
+      (q4.length?'<div class="muted">En Q4: '+esc(q4.join(', '))+'.</div>':'');
+  }
+
+  function rEjecutivo(nombre, mk, explicito){
+    var d = ADH.byMonth[mk], e = (d.ejecutivo||[]).filter(function(x){return x.nombre===nombre;})[0];
+    if(!e){
+      // sin monitoreos ese mes: usar el último mes con datos
+      for(var i=ADH.months.length-1; i>=0 && !e; i--){
+        var k = ADH.months[i].key, x = (ADH.byMonth[k].ejecutivo||[]).filter(function(y){return y.nombre===nombre;})[0];
+        if(x){ e = x; if(explicito) return nombreCorto(nombre)+' no tiene monitoreos en '+labelMes(mk)+'. Su último mes con datos es '+labelMes(k)+'.'+sug(['¿Cómo le fue a '+nombreCorto(nombre)+' en '+ADH.months[i].label.split(' ')[0]+'?']); mk = k; d = ADH.byMonth[k]; }
+      }
+      if(!e) return 'No encontré monitoreos de '+nombreCorto(nombre)+'.';
+    }
+    var orden = d.ejecutivo.slice().sort(function(a,b){return (b.adherencia||0)-(a.adherencia||0);});
+    var pos = orden.indexOf(e)+1, p = prevKey(mk);
+    var ep = p ? (ADH.byMonth[p].ejecutivo||[]).filter(function(x){return x.nombre===nombre;})[0] : null;
+    var gpp = Object.keys(e.gpp||{}).filter(function(g){return e.gpp[g]!==null;}).sort(function(a,b){return e.gpp[a]-e.gpp[b];});
+    var det = (d.detalle||[]).filter(function(x){return x.nombre===nombre;});
+    var fallas = {UF:0,NEG:0,CUMP:0};
+    det.forEach(function(x){ if(x.pecuf<100) fallas.UF++; if(x.pecneg<100) fallas.NEG++; if(x.peccump<100) fallas.CUMP++; });
+    var c = contarRet((d.ret||[]).filter(function(r){return r.n===nombre;}));
+    var op = det.filter(function(x){return x.oportunidades;})[0];
+    return '<b>'+nombreCorto(nombre)+' · '+labelMes(mk)+'</b><div class="muted">Supervisor: '+nombreCorto(e.jefe)+'</div>'+
+      '<ul><li>Adherencia: <b>'+f1(e.adherencia)+'</b>'+(ep?delta(e.adherencia,ep.adherencia):'')+' · puesto '+pos+' de '+orden.length+' ('+e.cuartil+')</li>'+
+      '<li>PEC: '+f1(e.pec)+' · PENC: '+f1(e.penc)+' · '+n0(e.q)+' monitoreos</li>'+
+      '<li>Fallas PEC: UF '+fallas.UF+' · NEG '+fallas.NEG+' · CUMP '+fallas.CUMP+'</li>'+
+      (gpp.length?'<li>Categorías más bajas: '+gpp.slice(0,2).map(function(g){return g+' '+pct(e.gpp[g],0);}).join(', ')+'</li>':'')+
+      '<li>Retenciones: '+c.ret+' · renuncias: '+c.ren+(c.pct!==null?' ('+f1(c.pct)+')':'')+'</li></ul>'+
+      (op?'<div class="muted"><b>Última oportunidad de mejora:</b> '+esc(String(op.oportunidades).slice(0,260))+(String(op.oportunidades).length>260?'…':'')+'</div>':'');
+  }
+
+  function rSupervisor(nombre, mk){
+    var d = ADH.byMonth[mk], s = (d.supervisor||[]).filter(function(x){return x.nombre===nombre;})[0];
+    if(!s) return nombreCorto(nombre)+' no tiene monitoreos de su equipo en '+labelMes(mk)+'.';
+    var p = prevKey(mk), sp = p ? (ADH.byMonth[p].supervisor||[]).filter(function(x){return x.nombre===nombre;})[0] : null;
+    var eq = (d.ejecutivo||[]).filter(function(e){return e.jefe===nombre;}).sort(function(a,b){return (b.adherencia||0)-(a.adherencia||0);});
+    var c = contarRet((d.ret||[]).filter(function(r){return r.j===nombre;}));
+    return '<b>Equipo de '+nombreCorto(nombre)+' · '+labelMes(mk)+'</b> ('+eq.length+' ejecutivos, '+n0(s.q)+' monitoreos)'+
+      '<ul><li>Adherencia: <b>'+f1(s.adherencia)+'</b>'+(sp?delta(s.adherencia,sp.adherencia):'')+' · PEC: '+f1(s.pec)+' · PENC: '+f1(s.penc)+'</li>'+
+      '<li>Retención: <b>'+f1(c.pct)+'</b> ('+c.ret+' retenciones, '+c.ren+' renuncias)</li></ul>'+
+      (eq.length?'<div class="muted">Mejor: '+nombreCorto(eq[0].nombre)+' ('+f1(eq[0].adherencia)+') · Menor: '+nombreCorto(eq[eq.length-1].nombre)+' ('+f1(eq[eq.length-1].adherencia)+')</div>':'')+
+      sug(['Ejecutivos con menor adherencia del equipo de '+nombreCorto(nombre).split(' ')[0], 'Retención por supervisor']);
+  }
+
+  function rAyuda(){
+    return 'Puedo responder con los datos del dashboard. Prueba con:'+
+      '<ul><li>"Resumen de setiembre" o "¿cómo vamos?"</li><li>"Top 5" / "menor adherencia"</li>'+
+      '<li>"Errores más frecuentes semana 2"</li><li>"Retenciones de agosto" / "retención por motivo"</li>'+
+      '<li>"¿Cómo le fue a Karla?" / "equipo de Paolo"</li><li>"Evolución", "por semana", "cuartiles"</li></ul>'+
+      '<div class="muted">Si no dices el mes, uso el último ('+labelMes(ADH.defaultMonth)+'). Funciona sin internet y sin enviar datos a nadie.</div>'+
+      sug(['¿Cómo vamos?', 'Top 5', 'Errores más frecuentes', 'Retenciones']);
+  }
+
+  /* ---------- interpretación de la pregunta ---------- */
+  function responder(q){
+    var nq = norm(q), mesQ = detectarMes(q), mk = mesQ || ADH.defaultMonth, sem = detectarSemana(q);
+    if(!ADH.byMonth[mk]) return 'No tengo datos de ese mes.';
+    if(sem && !(ADH.byMonth[mk].porSemana||{})[sem]) return 'No hay monitoreos en '+sem+' de '+labelMes(mk)+'.'+sug(['Por semana '+labelMes(mk).split(' ')[0].toLowerCase()]);
+    if(/^(hola|ayuda|help|\?)|que (puedes|sabes)|como funciona/.test(nq.trim())) return rAyuda();
+
+    var personas = buscarPersona(q);
+    var pideEquipo = /equipo|supervisor/.test(nq);
+    var pideRet = /retenc|renunc|retien|retuvo/.test(nq);
+    var pideRank = /(top|mejor|mayor|destac|peor|menor|bajo|baja|ultimo|ranking)/.test(nq);
+    var peores = /(peor|menor|bajo|baja|ultimo)/.test(nq);
+    if(personas.length>1 && personas.every(function(p){return p.tipo===personas[0].tipo;}) === false){
+      var sups = personas.filter(function(p){return p.tipo==='sup';});
+      if(pideEquipo && sups.length===1) personas = sups;
+    }
+    if(personas.length>1){
+      return '¿A quién te refieres?'+sug(personas.slice(0,8).map(function(p){ return (p.tipo==='sup'?'Equipo de ':'¿Cómo le fue a ')+nombreCorto(p.nombre)+(p.tipo==='sup'?'':'?'); }));
+    }
+    if(personas.length===1){
+      var per = personas[0];
+      if(per.tipo==='sup'){
+        if(pideRet) return rRetencion(mk, sem, function(r){return r.j===per.nombre;}, 'equipo de '+nombreCorto(per.nombre));
+        if(pideRank) return rRanking(mk, !peores, per.nombre);
+        return rSupervisor(per.nombre, mk);
+      }
+      if(pideRet) return rRetencion(mk, sem, function(r){return r.n===per.nombre;}, nombreCorto(per.nombre));
+      return rEjecutivo(per.nombre, mk, !!mesQ);
+    }
+    if(/motivo/.test(nq)) return rMotivos(mk, sem);
+    if(pideRet && /supervisor/.test(nq)) return rRetSupervisores(mk);
+    if(pideRet) return rRetencion(mk, sem);
+    if(/error|falla|pareto|hallazgo|mejorar|oportunidad|item/.test(nq)) return rErrores(mk, sem);
+    if(/cuartil|q4|q1/.test(nq)) return rCuartiles(mk);
+    if(/evoluc|tendencia|historic|meses|mensual|compar/.test(nq)) return rEvolucion();
+    if(pideRank) return rRanking(mk, !peores);
+    if(/semana|semanal/.test(nq) && !sem) return rSemanas(mk);
+    if(/resumen|como vamos|kpi|general|adherencia|pec|penc|indicador/.test(nq) || mesQ || sem) return rResumen(mk, sem);
+    return 'No entendí la pregunta. '+rAyuda();
+  }
+
+  /* ---------- interfaz ---------- */
+  var body = $('chat-body');
+  function agregar(html, quien){
+    var div = document.createElement('div');
+    div.className = 'chat-msg '+quien;
+    div.innerHTML = html;
+    body.appendChild(div);
+    div.querySelectorAll('.chat-sug button').forEach(function(b){ b.addEventListener('click', function(){ preguntar(b.dataset.q); }); });
+    body.scrollTop = body.scrollHeight;
+  }
+  function preguntar(q){
+    q = String(q||'').trim();
+    if(!q) return;
+    agregar(esc(q), 'user');
+    var r;
+    try{ r = responder(q); }catch(err){ r = 'No pude calcular esa respuesta.'; }
+    agregar(r, 'bot');
+  }
+  $('chat-fab').addEventListener('click', function(){
+    $('chat-panel').classList.remove('hidden'); $('chat-fab').style.display = 'none';
+    if(!body.children.length) agregar('Hola 👋 '+rAyuda(), 'bot');
+    $('chat-text').focus();
+  });
+  $('chat-close').addEventListener('click', function(){ $('chat-panel').classList.add('hidden'); $('chat-fab').style.display = ''; });
+  $('chat-form').addEventListener('submit', function(e){ e.preventDefault(); var t = $('chat-text'); preguntar(t.value); t.value = ''; });
+})();
+</script>
 </body>
 </html>
