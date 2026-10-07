@@ -3531,6 +3531,12 @@ document.addEventListener('DOMContentLoaded', function(){
 </div>
 <script>
 (function(){
+  /* URL del intermediario de IA gratuito (Cloudflare Worker, ver BI\chatbot_ia\LEEME.txt).
+     Vacío = el asistente responde solo con las preguntas que entiende localmente. */
+  var CHAT_IA_URL = 'https://a365-entel-9459.dsarmiento.workers.dev';
+  var historialIA = [];   // últimos turnos (texto) para que la IA siga la conversación
+  var ultimaPersona = null;
+  var ultimoMes = null;   // mes del que se viene hablando (para preguntas de seguimiento)
   /* ---------- utilidades ---------- */
   function norm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
   function f1(v){ return pct(v,1); }
@@ -3566,14 +3572,18 @@ document.addEventListener('DOMContentLoaded', function(){
   function detectarMes(q){
     var nq = norm(q);
     if(/mes (pasado|anterior)/.test(nq)) return prevKey(ADH.defaultMonth) || ADH.defaultMonth;
-    var anio = (nq.match(/20\d\d/)||[])[0];
+    var meses = detectarMeses(q);
+    return meses.length ? meses[meses.length-1] : null;   // el más reciente mencionado
+  }
+  function detectarMeses(q){
+    var nq = norm(q), anio = (nq.match(/20\d\d/)||[])[0], keys = {};
     for(var nombre in MESES_N){
       if(nq.indexOf(nombre)>=0){
         var cand = ADH.months.filter(function(m){ return m.mes===MESES_N[nombre] && (!anio || String(m.anio)===anio); });
-        if(cand.length) return cand[cand.length-1].key;
+        if(cand.length) keys[cand[cand.length-1].key] = 1;
       }
     }
-    return null;
+    return Object.keys(keys).sort();
   }
   function detectarSemana(q){
     var m = norm(q).match(/semana\s*([1-4])|\bs([1-4])\b/);
@@ -3735,7 +3745,7 @@ document.addEventListener('DOMContentLoaded', function(){
       '<ul><li>"Resumen de setiembre" o "¿cómo vamos?"</li><li>"Top 5" / "menor adherencia"</li>'+
       '<li>"Errores más frecuentes semana 2"</li><li>"Retenciones de agosto" / "retención por motivo"</li>'+
       '<li>"¿Cómo le fue a Karla?" / "equipo de Paolo"</li><li>"Evolución", "por semana", "cuartiles"</li></ul>'+
-      '<div class="muted">Si no dices el mes, uso el último ('+labelMes(ADH.defaultMonth)+'). Funciona sin internet y sin enviar datos a nadie.</div>'+
+      '<div class="muted">Si no dices el mes, uso el último ('+labelMes(ADH.defaultMonth)+'). '+(CHAT_IA_URL ? 'Lo que no esté en esta lista (análisis, recomendaciones, "¿por qué…?") lo responde la IA.' : 'Funciona sin internet y sin enviar datos a nadie.')+'</div>'+
       sug(['¿Cómo vamos?', 'Top 5', 'Errores más frecuentes', 'Retenciones']);
   }
 
@@ -3745,6 +3755,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if(!ADH.byMonth[mk]) return 'No tengo datos de ese mes.';
     if(sem && !(ADH.byMonth[mk].porSemana||{})[sem]) return 'No hay monitoreos en '+sem+' de '+labelMes(mk)+'.'+sug(['Por semana '+labelMes(mk).split(' ')[0].toLowerCase()]);
     if(/^(hola|ayuda|help|\?)|que (puedes|sabes)|como funciona/.test(nq.trim())) return rAyuda();
+    if(CHAT_IA_URL && PIDE_ANALISIS.test(nq)) return null;   // análisis abierto: lo responde la IA
 
     var personas = buscarPersona(q);
     var pideEquipo = /equipo|supervisor/.test(nq);
@@ -3777,7 +3788,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if(pideRank) return rRanking(mk, !peores);
     if(/semana|semanal/.test(nq) && !sem) return rSemanas(mk);
     if(/resumen|como vamos|kpi|general|adherencia|pec|penc|indicador/.test(nq) || mesQ || sem) return rResumen(mk, sem);
-    return 'No entendí la pregunta. '+rAyuda();
+    return null;   // no reconocida
   }
 
   /* ---------- interfaz ---------- */
@@ -3787,17 +3798,128 @@ document.addEventListener('DOMContentLoaded', function(){
     div.className = 'chat-msg '+quien;
     div.innerHTML = html;
     body.appendChild(div);
-    div.querySelectorAll('.chat-sug button').forEach(function(b){ b.addEventListener('click', function(){ preguntar(b.dataset.q); }); });
+    activarSug(div);
     body.scrollTop = body.scrollHeight;
+  }
+  function activarSug(div){
+    div.querySelectorAll('.chat-sug button').forEach(function(b){ b.addEventListener('click', function(){ preguntar(b.dataset.q); }); });
   }
   function preguntar(q){
     q = String(q||'').trim();
     if(!q) return;
     agregar(esc(q), 'user');
     var r;
+    if(detectarMes(q)) ultimoMes = detectarMes(q);
     try{ r = responder(q); }catch(err){ r = 'No pude calcular esa respuesta.'; }
+    if(r===null){
+      if(CHAT_IA_URL) return preguntarIA(q);
+      r = 'No entendí la pregunta. '+rAyuda();
+    }
+    var p = buscarPersona(q);
+    if(p.length===1) ultimaPersona = p[0];
     agregar(r, 'bot');
+    // lo respondido localmente también queda como contexto para preguntas siguientes a la IA
+    var tmp = document.createElement('div'); tmp.innerHTML = r;
+    historialIA.push({role:'user', content:q}, {role:'assistant', content:tmp.innerText.slice(0,1200)});
   }
+  /* ---------- IA: datos que se envían y llamada al intermediario ---------- */
+  var PIDE_ANALISIS = /por ?que|recomiend|sugier|analiz|explica|consejo|que hago|que hacer|como mejor|conclus|causa|interpret|feedback|retroaliment|plan de accion|prioriz/;
+
+  function r1(v){ return (v===null||v===undefined) ? '-' : (Math.round(v*10)/10)+'%'; }
+  function contextoIA(q){
+    var mk = detectarMes(q) || ultimoMes || ADH.defaultMonth, d = ADH.byMonth[mk], L = [];
+    var mm = detectarMeses(q), p = mm.length>1 ? mm[mm.length-2] : prevKey(mk);
+    var k = d.kpis;
+    L.push('CÓMO ANALIZAR: para explicar una subida o bajada compara el MES ANALIZADO con el MES DE COMPARACIÓN: '+
+      'qué bloques cambiaron más (PENC, PEC UF, PEC NEG, PEC CUMP), qué categorías GPP bajaron, qué errores aumentaron, '+
+      'qué supervisores o ejecutivos explican la diferencia y si cambió el tamaño de muestra (Q). Da conclusiones concretas con cifras de estos datos.', '');
+    L.push('MES ANALIZADO: '+labelMes(mk)+' (último mes disponible: '+labelMes(ADH.defaultMonth)+')');
+    L.push('KPIs: Q '+k.q+' | Adherencia '+r1(k.adherencia)+' | PEC '+r1(k.pec)+' | PENC '+r1(k.penc)+' | PEC UF '+r1(k.pecuf)+' | PEC NEG '+r1(k.pecneg)+' | PEC CUMP '+r1(k.peccump));
+    function gppTxt(g){ return Object.keys(g||{}).map(function(x){return x+' '+r1(g[x]);}).join(' | '); }
+    L.push('Categorías GPP: '+gppTxt(d.gpp));
+    if(p){
+      var dp = ADH.byMonth[p], kp = dp.kpis;
+      L.push('', 'MES DE COMPARACIÓN: '+labelMes(p));
+      L.push('KPIs: Q '+kp.q+' | Adherencia '+r1(kp.adherencia)+' | PEC '+r1(kp.pec)+' | PENC '+r1(kp.penc)+' | PEC UF '+r1(kp.pecuf)+' | PEC NEG '+r1(kp.pecneg)+' | PEC CUMP '+r1(kp.peccump));
+      L.push('Categorías GPP: '+gppTxt(dp.gpp));
+      L.push('Supervisores (nombre | Q | adherencia | PEC | PENC): '+(dp.supervisor||[]).map(function(s){return s.nombre+' | '+s.q+' | '+r1(s.adherencia)+' | '+r1(s.pec)+' | '+r1(s.penc);}).join(' || '));
+      L.push('Errores más frecuentes (ítem | casos | % con error): '+(dp.pareto||[]).filter(function(x){return x.errores>0;}).slice(0,8).map(function(x){return x.item+' | '+x.errores+' | '+r1(100-x.pct);}).join(' || '));
+    }
+    L.push('', 'EVOLUCIÓN MENSUAL (mes | Q | adherencia | PEC | % retención):');
+    ADH.months.forEach(function(m){
+      var e = ADH.evolMensual.filter(function(x){return x.key===m.key;})[0] || {}, c = contarRet(ADH.byMonth[m.key].ret||[]);
+      L.push(m.label+' | '+e.q+' | '+r1(e.adherencia)+' | '+r1(e.pec)+' | '+r1(c.pct));
+    });
+    L.push('', 'SUPERVISORES '+labelMes(mk)+' (nombre | Q | adherencia | PEC | PENC | retenciones | renuncias):');
+    (d.supervisor||[]).forEach(function(s){
+      var c = contarRet((d.ret||[]).filter(function(r){return r.j===s.nombre;}));
+      L.push(s.nombre+' | '+s.q+' | '+r1(s.adherencia)+' | '+r1(s.pec)+' | '+r1(s.penc)+' | '+c.ret+' | '+c.ren);
+    });
+    L.push('', 'EJECUTIVOS '+labelMes(mk)+' (nombre | supervisor | Q | adherencia | PEC | PENC | cuartil | retenciones | renuncias | 2 categorías más bajas):');
+    (d.ejecutivo||[]).forEach(function(e){
+      var c = contarRet((d.ret||[]).filter(function(r){return r.n===e.nombre;}));
+      var g = Object.keys(e.gpp||{}).filter(function(x){return e.gpp[x]!==null;}).sort(function(a,b){return e.gpp[a]-e.gpp[b];}).slice(0,2)
+        .map(function(x){return x+' '+r1(e.gpp[x]);}).join(', ');
+      L.push(e.nombre+' | '+e.jefe+' | '+e.q+' | '+r1(e.adherencia)+' | '+r1(e.pec)+' | '+r1(e.penc)+' | '+e.cuartil+' | '+c.ret+' | '+c.ren+' | '+g);
+    });
+    L.push('', 'ERRORES MÁS FRECUENTES '+labelMes(mk)+' (ítem | bloque | casos | % de monitoreos con error):');
+    (d.pareto||[]).filter(function(x){return x.errores>0;}).slice(0,12).forEach(function(x){
+      L.push(x.item+' | '+x.bloque+' | '+x.errores+' | '+r1(100-x.pct));
+    });
+    var mot = {};
+    (d.ret||[]).forEach(function(r){ var m = mot[r.mo] = mot[r.mo] || []; m.push(r); });
+    L.push('', 'MOTIVOS DE RENUNCIA '+labelMes(mk)+' (motivo | llamadas | retenciones | renuncias):');
+    Object.keys(mot).forEach(function(m){ var c = contarRet(mot[m]); L.push(m+' | '+c.total+' | '+c.ret+' | '+c.ren); });
+    L.push('', 'SEMANAS '+labelMes(mk)+' (semana | Q | adherencia | PEC | PENC):');
+    (d.semanal||[]).forEach(function(w){ L.push(w.semana+' | '+w.q+' | '+r1(w.adherencia)+' | '+r1(w.pec)+' | '+r1(w.penc)); });
+    // Evaluaciones de la persona mencionada (o de la última de la conversación)
+    var per = buscarPersona(q);
+    per = per.length===1 ? per[0] : (per.length ? null : ultimaPersona);
+    if(per){
+      ultimaPersona = per;
+      var campo = per.tipo==='sup' ? 'jefe' : 'nombre';
+      var ev = (d.detalle||[]).filter(function(x){return x[campo]===per.nombre;}).slice(0,10);
+      L.push('', 'EVALUACIONES DE '+per.nombre+' en '+labelMes(mk)+' (fecha | ejecutivo | resultado | motivo | adherencia | PEC UF | PEC NEG | PEC CUMP | PENC | fortalezas | oportunidades | plan de acción):');
+      ev.forEach(function(x){
+        function t(s){ return String(s||'-').replace(/\s+/g,' ').slice(0,250); }
+        L.push([x.fecha, x.nombre, x.tipoGestion, x.motivo, r1(x.adherencia), r1(x.pecuf), r1(x.pecneg), r1(x.peccump), r1(x.penc), t(x.fortalezas), t(x.oportunidades), t(x.planAccion)].join(' | '));
+      });
+    }
+    return L.join('\n');
+  }
+
+  function formatoIA(texto){
+    return esc(texto).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+  }
+
+  function preguntarIA(q){
+    var div = document.createElement('div');
+    div.className = 'chat-msg bot';
+    div.innerHTML = '<span class="muted">Analizando con IA…</span>';
+    body.appendChild(div);
+    body.scrollTop = body.scrollHeight;
+    var mk = detectarMes(q) || ultimoMes || ADH.defaultMonth;
+    fetch(CHAT_IA_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pregunta: q, contexto: contextoIA(q), historial: historialIA.slice(-6)})
+    }).then(function(r){ return r.json().catch(function(){ return {error: 'respuesta inválida ('+r.status+')'}; }); })
+      .then(function(res){
+        if(res.respuesta){
+          div.innerHTML = formatoIA(res.respuesta)+'<div class="muted" style="margin-top:6px;">🤖 Respuesta generada por IA con los datos de '+labelMes(mk)+'. Verifica las cifras importantes en el dashboard.</div>';
+          historialIA.push({role:'user', content:q}, {role:'assistant', content:res.respuesta});
+        } else {
+          div.innerHTML = 'La IA no pudo responder: '+esc(res.error||'error')+'. '+rAyuda();
+          activarSug(div);
+        }
+        body.scrollTop = body.scrollHeight;
+      })
+      .catch(function(){
+        div.innerHTML = 'No pude conectarme con la IA (¿sin internet?). '+rAyuda();
+        activarSug(div);
+      });
+  }
+
   $('chat-fab').addEventListener('click', function(){
     $('chat-panel').classList.remove('hidden'); $('chat-fab').style.display = 'none';
     if(!body.children.length) agregar('Hola 👋 '+rAyuda(), 'bot');
