@@ -1978,7 +1978,8 @@ function openAdhModal(m){
   $('adh-modal-fortalezas').textContent = m.fortalezas || 'Sin registro';
   $('adh-modal-oportunidades').textContent = m.oportunidades || 'Sin registro';
   $('adh-modal-plan').textContent = m.planAccion || 'Sin registro';
-  $('adh-modal-facts').innerHTML = '<div><b>Motivo:</b> '+esc(m.motivo||'–')+'</div>'+
+  $('adh-modal-facts').innerHTML = '<div><b>Fecha de atención:</b> '+esc(m.fechaAtencion||'–')+' · <b>Envío:</b> '+esc(m.fecha||'–')+'</div>'+
+    '<div><b>Motivo:</b> '+esc(m.motivo||'–')+'</div>'+
     '<div><b>Supervisor:</b> '+esc(m.jefe||'–')+'</div>'+
     '<div><b>Tipo de gestión:</b> '+esc(m.tipoGestion||'–')+'</div>'+
     '<div><b>Sub tipo:</b> '+esc(m.subTipoGestion||'–')+'</div>'+
@@ -3746,35 +3747,117 @@ document.addEventListener('DOMContentLoaded', function(){
       sug(['Ejecutivos con menor adherencia del equipo de '+nombreCorto(nombre).split(' ')[0], 'Retención por supervisor']);
   }
 
-  /* ---------- fechas de las pautas (fecha de envío de cada evaluación) ---------- */
+  /* ---------- fechas de las pautas ----------
+     fecha         = fecha de envío de la pauta (columna "Fecha Envío" del Excel)
+     fechaAtencion = día en que se atendió la llamada evaluada ("GP_Fecha Atención") */
+  var NOMBRE_FECHA = {fecha:'envío de la pauta', fechaAtencion:'atención de la llamada'};
   function fFecha(s){ if(!s) return '–'; var x = s.split('-'); return x[2]+'/'+x[1]+'/'+x[0]; }
-  function rangoFechas(lista){
-    var f = lista.map(function(x){return x.fecha;}).filter(Boolean).sort();
+  function rangoFechas(lista, campo){
+    campo = campo || 'fecha';
+    var f = lista.map(function(x){return x[campo];}).filter(Boolean).sort();
     return f.length ? {desde:f[0], hasta:f[f.length-1], n:lista.length} : null;
   }
-  function ultimaFechaTotal(){
-    var max = '';
-    ADH.months.forEach(function(m){ (ADH.byMonth[m.key].detalle||[]).forEach(function(x){ if(x.fecha && x.fecha>max) max = x.fecha; }); });
-    return max;
+  function todasLasPautas(){
+    var t = [];
+    ADH.months.forEach(function(m){ (ADH.byMonth[m.key].detalle||[]).forEach(function(x){ t.push(x); }); });
+    return t;
   }
+  function ultimaFechaTotal(campo){
+    var r = rangoFechas(todasLasPautas(), campo);
+    return r ? r.hasta : '';
+  }
+  function campoFecha(nq){ return /atenc|atendi|llamada/.test(nq) ? 'fechaAtencion' : 'fecha'; }
+
+  // Fechas escritas en la pregunta: "15/09", "15-09-2026", "15 de setiembre", "del 1 al 7 de setiembre"
+  function detectarFechas(q){
+    // "semana 2 de setiembre" o "top 5 de octubre" no son fechas
+    var nq = norm(q).replace(/\b(semana|semanas|top|s|q)\s*\d+/g, ' '), out = [], m;
+    var mesesRe = Object.keys(MESES_N).join('|');
+    function anioPara(mes){
+      var c = ADH.months.filter(function(x){return x.mes===mes;});
+      return c.length ? c[c.length-1].anio : (ADH.months.length ? ADH.months[ADH.months.length-1].anio : new Date().getFullYear());
+    }
+    function add(d, mes, anio){
+      d = +d; mes = +mes;
+      if(!(d>=1 && d<=31 && mes>=1 && mes<=12)) return;
+      anio = anio ? (+anio<100 ? 2000+(+anio) : +anio) : anioPara(mes);
+      out.push(anio+'-'+String(mes).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
+    }
+    var reRango = new RegExp('(\\d{1,2})\\s*(?:al?|y|-)\\s*(?:el\\s+)?(\\d{1,2})\\s*(?:de\\s+)?('+mesesRe+')', 'g');
+    while((m = reRango.exec(nq))){ add(m[1], MESES_N[m[3]]); add(m[2], MESES_N[m[3]]); }
+    var reNum = /(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/g;
+    while((m = reNum.exec(nq))){ add(m[1], m[2], m[3]); }
+    var reTexto = new RegExp('(\\d{1,2})\\s*(?:de\\s+)?('+mesesRe+')', 'g');
+    while((m = reTexto.exec(nq))){ add(m[1], MESES_N[m[2]]); }
+    out = out.filter(function(v, i){ return out.indexOf(v)===i; }).sort();
+    return out.length ? {desde:out[0], hasta:out[out.length-1]} : null;
+  }
+
+  function rPorFecha(rango, campo, persona){
+    var lista = todasLasPautas().filter(function(x){
+      return x[campo] && x[campo]>=rango.desde && x[campo]<=rango.hasta &&
+        (!persona || x[persona.tipo==='sup' ? 'jefe' : 'nombre']===persona.nombre);
+    });
+    var titulo = (rango.desde===rango.hasta ? 'el '+fFecha(rango.desde) : 'del '+fFecha(rango.desde)+' al '+fFecha(rango.hasta));
+    var otro = campo==='fecha' ? 'fechaAtencion' : 'fecha';
+    if(!lista.length){
+      var r = rangoFechas(todasLasPautas(), campo);
+      return 'No hay pautas con fecha de '+NOMBRE_FECHA[campo]+' '+titulo+(persona?' para '+nombreCorto(persona.nombre):'')+'.'+
+        (r ? '<div class="muted">Hay datos de '+NOMBRE_FECHA[campo]+' del '+fFecha(r.desde)+' al '+fFecha(r.hasta)+'.</div>' : '');
+    }
+    var adh = avgOf(lista, 'adherencia'), ret = 0, ren = 0, pecOk = 0;
+    lista.forEach(function(x){ if(x.tipoGestion==='Retención') ret++; else if(x.tipoGestion==='Renuncia') ren++; if(x.pec===100) pecOk++; });
+    lista.sort(function(a,b){ return (b.adherencia||0)-(a.adherencia||0); });
+    var filas = lista.slice(0,20).map(function(x){
+      return [nombreCorto(x.nombre), fFecha(x[campo]), fFecha(x[otro]), f1(x.adherencia), esc(x.tipoGestion||'–')];
+    });
+    return '<b>Pautas por fecha de '+NOMBRE_FECHA[campo]+' · '+titulo+(persona?' · '+nombreCorto(persona.nombre):'')+'</b>'+
+      '<ul><li>'+lista.length+' pauta(s) · adherencia promedio <b>'+f1(adh)+'</b> · PEC '+f1(pecOk/lista.length*100)+'</li>'+
+      '<li>'+ret+' retenciones, '+ren+' renuncias'+((ret+ren)?' ('+f1(ret/(ret+ren)*100)+' de retención)':'')+'</li></ul>'+
+      tabla(['Ejecutivo', campo==='fecha'?'Envío':'Atención', campo==='fecha'?'Atención':'Envío', 'Adh.', 'Resultado'], filas)+
+      (lista.length>20 ? '<div class="muted">Se muestran 20 de '+lista.length+', de mayor a menor adherencia.</div>' : '')+
+      sug([campo==='fecha' ? 'Pautas por fecha de atención '+titulo.replace(/^el /,'') : 'Pautas enviadas '+titulo.replace(/^el /,'')]);
+  }
+
+  // Ranking de días: "¿qué día de atención tuvo menor adherencia?"
+  function rDias(mk, campo, peores){
+    var g = {};
+    (ADH.byMonth[mk].detalle||[]).forEach(function(x){ if(x[campo]) (g[x[campo]] = g[x[campo]] || []).push(x); });
+    var dias = Object.keys(g).map(function(f){ return {f:f, n:g[f].length, adh:avgOf(g[f],'adherencia')}; });
+    if(!dias.length) return 'No hay pautas en '+labelMes(mk)+'.';
+    dias.sort(function(a,b){ return peores ? a.adh-b.adh : b.adh-a.adh; });
+    return '<b>Días con '+(peores?'menor':'mayor')+' adherencia · '+labelMes(mk)+'</b><div class="muted">Por fecha de '+NOMBRE_FECHA[campo]+'</div>'+
+      tabla(['Día','Pautas','Adh. promedio'], dias.slice(0,7).map(function(d){ return [fFecha(d.f), d.n, f1(d.adh)]; }))+
+      '<div class="muted">Ojo: días con 1–2 pautas son poco representativos.</div>';
+  }
+
   function rFechas(mk, persona){
     var d = ADH.byMonth[mk], det = d.detalle||[];
     if(persona){
-      var campo = persona.tipo==='sup' ? 'jefe' : 'nombre';
-      var mias = det.filter(function(x){return x[campo]===persona.nombre;});
+      var cp = persona.tipo==='sup' ? 'jefe' : 'nombre';
+      var mias = det.filter(function(x){return x[cp]===persona.nombre;});
       if(!mias.length) return nombreCorto(persona.nombre)+' no tiene pautas en '+labelMes(mk)+'.';
-      var rp = rangoFechas(mias);
+      var re = rangoFechas(mias, 'fecha'), ra = rangoFechas(mias, 'fechaAtencion');
       return '<b>Pautas de '+(persona.tipo==='sup'?'el equipo de ':'')+nombreCorto(persona.nombre)+' · '+labelMes(mk)+'</b>'+
-        '<ul><li>'+rp.n+' pauta(s), del <b>'+fFecha(rp.desde)+'</b> al <b>'+fFecha(rp.hasta)+'</b></li></ul>'+
-        (persona.tipo==='sup' ? '' : tabla(['Fecha','Semana','Adh.','Resultado'], mias.map(function(x){ return [fFecha(x.fecha), esc(x.semana||'–'), f1(x.adherencia), esc(x.tipoGestion||'–')]; })));
+        '<ul><li>'+mias.length+' pauta(s)</li>'+
+        (ra?'<li>Llamadas atendidas del <b>'+fFecha(ra.desde)+'</b> al <b>'+fFecha(ra.hasta)+'</b></li>':'')+
+        (re?'<li>Pautas enviadas del '+fFecha(re.desde)+' al '+fFecha(re.hasta)+'</li>':'')+'</ul>'+
+        (persona.tipo==='sup' ? '' : tabla(['Atención','Envío','Semana','Adh.','Resultado'], mias.map(function(x){
+          return [fFecha(x.fechaAtencion), fFecha(x.fecha), esc(x.semana||'–'), f1(x.adherencia), esc(x.tipoGestion||'–')];
+        })));
     }
-    var r = rangoFechas(det), sem = {};
+    var re2 = rangoFechas(det, 'fecha'), ra2 = rangoFechas(det, 'fechaAtencion'), sem = {};
     det.forEach(function(x){ (sem[x.semana||'–'] = sem[x.semana||'–'] || []).push(x); });
     return '<b>Fechas de las pautas · '+labelMes(mk)+'</b>'+
-      '<ul><li>Datos disponibles hasta el <b>'+fFecha(ultimaFechaTotal())+'</b> (última pauta cargada)</li>'+
-      (r ? '<li>'+labelMes(mk)+': '+r.n+' pautas, del '+fFecha(r.desde)+' al '+fFecha(r.hasta)+'</li>' : '')+'</ul>'+
-      tabla(['Semana','Pautas','Desde','Hasta'], Object.keys(sem).sort().map(function(s){ var x = rangoFechas(sem[s]); return [esc(s), x.n, fFecha(x.desde), fFecha(x.hasta)]; }))+
-      '<div class="muted">Fecha de envío de cada pauta en el Excel de Adherencias.</div>';
+      '<ul><li>Última llamada atendida con pauta: <b>'+fFecha(ultimaFechaTotal('fechaAtencion'))+'</b></li>'+
+      '<li>Última pauta enviada: <b>'+fFecha(ultimaFechaTotal('fecha'))+'</b></li>'+
+      (ra2 ? '<li>'+labelMes(mk)+': '+det.length+' pautas · atenciones del '+fFecha(ra2.desde)+' al '+fFecha(ra2.hasta)+
+        (re2 ? ' · enviadas del '+fFecha(re2.desde)+' al '+fFecha(re2.hasta) : '')+'</li>' : '')+'</ul>'+
+      tabla(['Semana','Pautas','Atención desde','Atención hasta'], Object.keys(sem).sort().map(function(s){
+        var x = rangoFechas(sem[s], 'fechaAtencion') || {desde:'', hasta:''};
+        return [esc(s), sem[s].length, fFecha(x.desde), fFecha(x.hasta)];
+      }))+
+      '<div class="muted">Del Excel de Adherencias: fecha de atención = día de la llamada evaluada; fecha de envío = día en que se envió la pauta.</div>';
   }
 
   function rAyuda(){
@@ -3782,7 +3865,8 @@ document.addEventListener('DOMContentLoaded', function(){
       '<ul><li>"Resumen de setiembre" o "¿cómo vamos?"</li><li>"Top 5" / "menor adherencia"</li>'+
       '<li>"Errores más frecuentes semana 2"</li><li>"Retenciones de agosto" / "retención por motivo"</li>'+
       '<li>"¿Cómo le fue a Karla?" / "equipo de Paolo"</li><li>"Evolución", "por semana", "cuartiles"</li>'+
-      '<li>"¿Hasta qué día tengo pautas?" / "fechas de las pautas de Karla"</li></ul>'+
+      '<li>"¿Hasta qué día tengo pautas?" / "fechas de las pautas de Karla"</li>'+
+      '<li>"Pautas atendidas el 15/09" / "atenciones del 1 al 7 de setiembre"</li></ul>'+
       '<div class="muted">Si no dices el mes, uso el último ('+labelMes(ADH.defaultMonth)+'). '+(CHAT_IA_URL ? 'Lo que no esté en esta lista (análisis, recomendaciones, "¿por qué…?") lo responde la IA.' : 'Funciona sin internet y sin enviar datos a nadie.')+'</div>'+
       sug(['¿Cómo vamos?', 'Top 5', 'Errores más frecuentes', 'Retenciones']);
   }
@@ -3795,7 +3879,16 @@ document.addEventListener('DOMContentLoaded', function(){
     if(/^(hola|ayuda|help|\?)|que (puedes|sabes)|como funciona/.test(nq.trim())) return rAyuda();
     if(CHAT_IA_URL && PIDE_ANALISIS.test(nq)) return null;   // análisis abierto: lo responde la IA
     // fechas: "¿hasta qué día tengo pautas?", "última evaluación", "fechas de las pautas de Karla"
-    if(/hasta (que|cuando)|que (dia|fecha)|fecha|ultim[ao]s? (pauta|evaluacion|monitoreo)|desde cuando|actualizad|al dia/.test(nq)){
+    var rangoQ = detectarFechas(q);
+    if(rangoQ){
+      var pr = buscarPersona(q);
+      if(pr.length>1) return '¿De quién?'+sug(pr.slice(0,8).map(function(x){ return q+' '+nombreCorto(x.nombre); }));
+      return rPorFecha(rangoQ, campoFecha(nq), pr.length===1 ? pr[0] : null);
+    }
+    if(/(que|cual|cuales) dias?|dias? (con|de) (menor|mayor|peor|mejor)/.test(nq) && /(menor|mayor|peor|mejor|baj|alt)/.test(nq)){
+      return rDias(mk, campoFecha(nq), /(menor|peor|baj)/.test(nq));
+    }
+    if(/hasta (que|cuando)|que (dia|fecha)|fecha|atencion|ultim[ao]s? (pauta|evaluacion|monitoreo|llamada|atencion)|desde cuando|actualizad|al dia/.test(nq)){
       var pf = buscarPersona(q);
       if(pf.length>1) return '¿De quién?'+sug(pf.slice(0,8).map(function(x){ return 'Fechas de las pautas de '+nombreCorto(x.nombre); }));
       return rFechas(mk, pf.length===1 ? pf[0] : null);
@@ -3882,8 +3975,15 @@ document.addEventListener('DOMContentLoaded', function(){
     function gppTxt(g){ return Object.keys(g||{}).map(function(x){return x+' '+r1(g[x]);}).join(' | '); }
     L.push('Categorías GPP: '+gppTxt(d.gpp));
     var rf = rangoFechas(d.detalle||[]);
-    L.push('FECHAS (fecha de envío de la pauta; "pauta" = evaluación de calidad = monitoreo): datos disponibles hasta '+fFecha(ultimaFechaTotal())+
-      (rf ? '; '+labelMes(mk)+' tiene '+rf.n+' pautas del '+fFecha(rf.desde)+' al '+fFecha(rf.hasta) : ''));
+    var ra = rangoFechas(d.detalle||[], 'fechaAtencion');
+    L.push('FECHAS ("pauta" = evaluación de calidad = monitoreo; fecha de atención = día de la llamada evaluada; fecha de envío = día en que se envió la pauta): '+
+      'última atención con pauta '+fFecha(ultimaFechaTotal('fechaAtencion'))+', última pauta enviada '+fFecha(ultimaFechaTotal('fecha'))+
+      (ra && rf ? '; '+labelMes(mk)+' tiene '+rf.n+' pautas de llamadas atendidas del '+fFecha(ra.desde)+' al '+fFecha(ra.hasta)+', enviadas del '+fFecha(rf.desde)+' al '+fFecha(rf.hasta) : ''));
+    var porDia = {};
+    (d.detalle||[]).forEach(function(x){ if(x.fechaAtencion){ (porDia[x.fechaAtencion] = porDia[x.fechaAtencion] || []).push(x); } });
+    L.push('PAUTAS POR DÍA DE ATENCIÓN '+labelMes(mk)+' (fecha | pautas | adherencia promedio): '+Object.keys(porDia).sort().map(function(f){
+      return fFecha(f)+' | '+porDia[f].length+' | '+r1(avgOf(porDia[f],'adherencia'));
+    }).join(' || '));
     if(p){
       var dp = ADH.byMonth[p], kp = dp.kpis;
       L.push('', 'MES DE COMPARACIÓN: '+labelMes(p));
@@ -3926,10 +4026,10 @@ document.addEventListener('DOMContentLoaded', function(){
       ultimaPersona = per;
       var campo = per.tipo==='sup' ? 'jefe' : 'nombre';
       var ev = (d.detalle||[]).filter(function(x){return x[campo]===per.nombre;}).slice(0,10);
-      L.push('', 'EVALUACIONES DE '+per.nombre+' en '+labelMes(mk)+' (fecha | ejecutivo | resultado | motivo | adherencia | PEC UF | PEC NEG | PEC CUMP | PENC | fortalezas | oportunidades | plan de acción):');
+      L.push('', 'EVALUACIONES DE '+per.nombre+' en '+labelMes(mk)+' (fecha de atención | fecha de envío | ejecutivo | resultado | motivo | adherencia | PEC UF | PEC NEG | PEC CUMP | PENC | fortalezas | oportunidades | plan de acción):');
       ev.forEach(function(x){
         function t(s){ return String(s||'-').replace(/\s+/g,' ').slice(0,250); }
-        L.push([x.fecha, x.nombre, x.tipoGestion, x.motivo, r1(x.adherencia), r1(x.pecuf), r1(x.pecneg), r1(x.peccump), r1(x.penc), t(x.fortalezas), t(x.oportunidades), t(x.planAccion)].join(' | '));
+        L.push([fFecha(x.fechaAtencion), fFecha(x.fecha), x.nombre, x.tipoGestion, x.motivo, r1(x.adherencia), r1(x.pecuf), r1(x.pecneg), r1(x.peccump), r1(x.penc), t(x.fortalezas), t(x.oportunidades), t(x.planAccion)].join(' | '));
       });
     }
     return L.join('\n');
