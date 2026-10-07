@@ -3746,11 +3746,43 @@ document.addEventListener('DOMContentLoaded', function(){
       sug(['Ejecutivos con menor adherencia del equipo de '+nombreCorto(nombre).split(' ')[0], 'Retención por supervisor']);
   }
 
+  /* ---------- fechas de las pautas (fecha de envío de cada evaluación) ---------- */
+  function fFecha(s){ if(!s) return '–'; var x = s.split('-'); return x[2]+'/'+x[1]+'/'+x[0]; }
+  function rangoFechas(lista){
+    var f = lista.map(function(x){return x.fecha;}).filter(Boolean).sort();
+    return f.length ? {desde:f[0], hasta:f[f.length-1], n:lista.length} : null;
+  }
+  function ultimaFechaTotal(){
+    var max = '';
+    ADH.months.forEach(function(m){ (ADH.byMonth[m.key].detalle||[]).forEach(function(x){ if(x.fecha && x.fecha>max) max = x.fecha; }); });
+    return max;
+  }
+  function rFechas(mk, persona){
+    var d = ADH.byMonth[mk], det = d.detalle||[];
+    if(persona){
+      var campo = persona.tipo==='sup' ? 'jefe' : 'nombre';
+      var mias = det.filter(function(x){return x[campo]===persona.nombre;});
+      if(!mias.length) return nombreCorto(persona.nombre)+' no tiene pautas en '+labelMes(mk)+'.';
+      var rp = rangoFechas(mias);
+      return '<b>Pautas de '+(persona.tipo==='sup'?'el equipo de ':'')+nombreCorto(persona.nombre)+' · '+labelMes(mk)+'</b>'+
+        '<ul><li>'+rp.n+' pauta(s), del <b>'+fFecha(rp.desde)+'</b> al <b>'+fFecha(rp.hasta)+'</b></li></ul>'+
+        (persona.tipo==='sup' ? '' : tabla(['Fecha','Semana','Adh.','Resultado'], mias.map(function(x){ return [fFecha(x.fecha), esc(x.semana||'–'), f1(x.adherencia), esc(x.tipoGestion||'–')]; })));
+    }
+    var r = rangoFechas(det), sem = {};
+    det.forEach(function(x){ (sem[x.semana||'–'] = sem[x.semana||'–'] || []).push(x); });
+    return '<b>Fechas de las pautas · '+labelMes(mk)+'</b>'+
+      '<ul><li>Datos disponibles hasta el <b>'+fFecha(ultimaFechaTotal())+'</b> (última pauta cargada)</li>'+
+      (r ? '<li>'+labelMes(mk)+': '+r.n+' pautas, del '+fFecha(r.desde)+' al '+fFecha(r.hasta)+'</li>' : '')+'</ul>'+
+      tabla(['Semana','Pautas','Desde','Hasta'], Object.keys(sem).sort().map(function(s){ var x = rangoFechas(sem[s]); return [esc(s), x.n, fFecha(x.desde), fFecha(x.hasta)]; }))+
+      '<div class="muted">Fecha de envío de cada pauta en el Excel de Adherencias.</div>';
+  }
+
   function rAyuda(){
     return 'Puedo responder con los datos del dashboard. Prueba con:'+
       '<ul><li>"Resumen de setiembre" o "¿cómo vamos?"</li><li>"Top 5" / "menor adherencia"</li>'+
       '<li>"Errores más frecuentes semana 2"</li><li>"Retenciones de agosto" / "retención por motivo"</li>'+
-      '<li>"¿Cómo le fue a Karla?" / "equipo de Paolo"</li><li>"Evolución", "por semana", "cuartiles"</li></ul>'+
+      '<li>"¿Cómo le fue a Karla?" / "equipo de Paolo"</li><li>"Evolución", "por semana", "cuartiles"</li>'+
+      '<li>"¿Hasta qué día tengo pautas?" / "fechas de las pautas de Karla"</li></ul>'+
       '<div class="muted">Si no dices el mes, uso el último ('+labelMes(ADH.defaultMonth)+'). '+(CHAT_IA_URL ? 'Lo que no esté en esta lista (análisis, recomendaciones, "¿por qué…?") lo responde la IA.' : 'Funciona sin internet y sin enviar datos a nadie.')+'</div>'+
       sug(['¿Cómo vamos?', 'Top 5', 'Errores más frecuentes', 'Retenciones']);
   }
@@ -3762,6 +3794,12 @@ document.addEventListener('DOMContentLoaded', function(){
     if(sem && !(ADH.byMonth[mk].porSemana||{})[sem]) return 'No hay monitoreos en '+sem+' de '+labelMes(mk)+'.'+sug(['Por semana '+labelMes(mk).split(' ')[0].toLowerCase()]);
     if(/^(hola|ayuda|help|\?)|que (puedes|sabes)|como funciona/.test(nq.trim())) return rAyuda();
     if(CHAT_IA_URL && PIDE_ANALISIS.test(nq)) return null;   // análisis abierto: lo responde la IA
+    // fechas: "¿hasta qué día tengo pautas?", "última evaluación", "fechas de las pautas de Karla"
+    if(/hasta (que|cuando)|que (dia|fecha)|fecha|ultim[ao]s? (pauta|evaluacion|monitoreo)|desde cuando|actualizad|al dia/.test(nq)){
+      var pf = buscarPersona(q);
+      if(pf.length>1) return '¿De quién?'+sug(pf.slice(0,8).map(function(x){ return 'Fechas de las pautas de '+nombreCorto(x.nombre); }));
+      return rFechas(mk, pf.length===1 ? pf[0] : null);
+    }
 
     var personas = buscarPersona(q);
     var pideEquipo = /equipo|supervisor/.test(nq);
@@ -3843,6 +3881,9 @@ document.addEventListener('DOMContentLoaded', function(){
     L.push('KPIs: Q '+k.q+' | Adherencia '+r1(k.adherencia)+' | PEC '+r1(k.pec)+' | PENC '+r1(k.penc)+' | PEC UF '+r1(k.pecuf)+' | PEC NEG '+r1(k.pecneg)+' | PEC CUMP '+r1(k.peccump));
     function gppTxt(g){ return Object.keys(g||{}).map(function(x){return x+' '+r1(g[x]);}).join(' | '); }
     L.push('Categorías GPP: '+gppTxt(d.gpp));
+    var rf = rangoFechas(d.detalle||[]);
+    L.push('FECHAS (fecha de envío de la pauta; "pauta" = evaluación de calidad = monitoreo): datos disponibles hasta '+fFecha(ultimaFechaTotal())+
+      (rf ? '; '+labelMes(mk)+' tiene '+rf.n+' pautas del '+fFecha(rf.desde)+' al '+fFecha(rf.hasta) : ''));
     if(p){
       var dp = ADH.byMonth[p], kp = dp.kpis;
       L.push('', 'MES DE COMPARACIÓN: '+labelMes(p));
